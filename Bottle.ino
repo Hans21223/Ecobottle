@@ -9,26 +9,26 @@
 #include <Preferences.h>
 #include <ArduinoOTA.h>
 #include <HTTPUpdate.h>
-#include <esp_now.h>  // 🚀 ไลบรารีวิทยุสื่อสาร
+#include <esp_now.h>
+#include <ArduinoJson.h>  // 🚀 เพิ่มไลบรารี JSON
 
-// 🚀 เปลี่ยนเป็น MAC Address ของบอร์ดเสียงที่คุณจดไว้
-uint8_t audioBoardAddress[] = {0xE0, 0x72, 0xA1, 0xD6, 0xDE, 0xE4};
-
-// โครงสร้างข้อความวิทยุ
+// ==========================================
+// 📡 การตั้งค่าวิทยุเสียง (ESP-NOW)
+// ==========================================
+uint8_t audioBoardAddress[] = { 0xE0, 0x72, 0xA1, 0xD6, 0xDE, 0xE4 };
 typedef struct struct_message {
   int command;
 } struct_message;
 struct_message audioMsg;
 esp_now_peer_info_t peerInfo;
 
-// ฟังก์ชันยิงคำสั่งเสียง
 void sendAudioCommand(int cmd) {
   audioMsg.command = cmd;
   esp_now_send(audioBoardAddress, (uint8_t*)&audioMsg, sizeof(audioMsg));
 }
 
 // ==========================================
-// การตั้งค่าความจุ และ Wi-Fi
+// ⚙️ การตั้งค่าระบบหลัก
 // ==========================================
 const int MAX_BIN_CAPACITY = 150;
 int currentBinCount = 0;
@@ -38,10 +38,10 @@ struct WiFiCreds {
   const char* password;
 };
 WiFiCreds networks[] = {
+  { "99/1257", "0843767150" },
   { "Hans", "12345678" },
-  { "Thanan's iPhone", "88888888" },
   { "SARAWUT_2.4GHz", "88628458" },
-  { "99/1257", "0843767150" }
+  { "Thanan's iPhone", "88888888" }
 };
 const int numNetworks = 4;
 
@@ -51,7 +51,7 @@ String googleScriptURL = "https://script.google.com/macros/s/AKfycbxI8vNijOMuvZ4
 String githubFirmwareURL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/firmware.bin";
 
 // ==========================================
-// Pins & Hardware
+// 🔌 พินและฮาร์ดแวร์
 // ==========================================
 #define TFT_DC 9
 #define TFT_CS 10
@@ -82,7 +82,16 @@ byte colPins[COLS] = { 8, 16, 46 };
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 // ==========================================
-// FSM & Data
+// 🌙 โหมดพักหน้าจอจำศีล (Screen Saver)
+// ==========================================
+unsigned long lastActivityTime = 0;
+const unsigned long SLEEP_TIMEOUT = 60000;  // จอดำเมื่อไม่มีการขยับ 1 นาที
+bool isScreenSleeping = false;
+
+void wakeUpScreen();  // ประกาศฟังก์ชันล่วงหน้า
+
+// ==========================================
+// 🗂️ สถานะระบบ (FSM & Data)
 // ==========================================
 enum SystemState { STATE_IDLE,
                    STATE_VERIFYING,
@@ -99,11 +108,7 @@ int sessionBottles = 0;
 int villageTotal = 850;
 const int VILLAGE_GOAL = 1500;
 
-volatile bool triggerVerify = false;
-volatile bool triggerSave = false;
-volatile bool triggerAlert = false;
-volatile bool triggerReset = false;
-volatile bool triggerUpdate = false;
+volatile bool triggerVerify = false, triggerSave = false, triggerAlert = false, triggerReset = false, triggerUpdate = false;
 volatile int networkResult = 0;
 TaskHandle_t TaskCore0;
 
@@ -113,30 +118,33 @@ int numKnownUsers = 0;
 String currentGuess = "";
 volatile bool triggerSyncVIP = true;
 
+// 🚀 ฟังก์ชันแกะกล่อง JSON
 void parseVIPData(String payload) {
-  numKnownUsers = 0;
-  knownUsers[numKnownUsers++] = "0000000000";
-  knownUsers[numKnownUsers++] = "8888888888";
-  knownUsers[numKnownUsers++] = "9999999999";
+  DynamicJsonDocument doc(4096);
+  DeserializationError error = deserializeJson(doc, payload);
 
-  int start = 0;
-  int end = payload.indexOf(',');
-  while (end != -1 && numKnownUsers < MAX_VIP) {
-    String p = payload.substring(start, end);
-    p.trim();
-    if (p.length() > 5) knownUsers[numKnownUsers++] = p;
-    start = end + 1;
-    end = payload.indexOf(',', start);
+  if (error) {
+    Serial.print("❌ อ่าน JSON ไม่สำเร็จ: ");
+    Serial.println(error.f_str());
+    return;
   }
-  if (start < payload.length() && numKnownUsers < MAX_VIP) {
-    String p = payload.substring(start);
-    p.trim();
-    if (p.length() > 5) knownUsers[numKnownUsers++] = p;
+
+  numKnownUsers = 0;
+  JsonArray vips = doc["vips"];
+  for (JsonVariant v : vips) {
+    if (numKnownUsers < MAX_VIP) {
+      String phone = v.as<String>();
+      if (phone.length() >= 9) {
+        knownUsers[numKnownUsers++] = phone;
+      }
+    }
   }
+  Serial.print("✅ โหลดเบอร์เข้าสมองสำเร็จจำนวน: ");
+  Serial.println(numKnownUsers);
 }
 
 // ==========================================
-// CORE 0: Network
+// 🌐 CORE 0: Network Task (ทำงานหลังบ้าน)
 // ==========================================
 void networkTask(void* pvParameters) {
   vTaskDelay(pdMS_TO_TICKS(2000));
@@ -164,7 +172,10 @@ void networkTask(void* pvParameters) {
       HTTPClient http;
       http.begin(client, googleScriptURL + "action=getVIPs");
       http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-      if (http.GET() > 0) { parseVIPData(http.getString()); }
+      if (http.GET() > 0) {
+        String payload = http.getString();
+        parseVIPData(payload);  // 🚀 ส่งให้ตัวแกะ JSON ทำงาน
+      }
       http.end();
       triggerSyncVIP = false;
     }
@@ -243,8 +254,7 @@ void networkTask(void* pvParameters) {
 
 void maintainWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
-  WiFi.disconnect(true, true);
-  WiFi.mode(WIFI_OFF);
+
   vTaskDelay(pdMS_TO_TICKS(200));
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
@@ -262,8 +272,16 @@ void maintainWiFi() {
 }
 
 // ==========================================
-// UI Functions
+// 🎨 UI & Graphics Functions
 // ==========================================
+void wakeUpScreen() {
+  if (isScreenSleeping) {
+    if (currentState == STATE_IDLE) drawLockedScreen();
+    isScreenSleeping = false;
+  }
+  lastActivityTime = millis();
+}
+
 void drawVillageProgress() {
   int barWidth = 280;
   int progress = map(villageTotal, 0, VILLAGE_GOAL, 0, barWidth);
@@ -309,6 +327,7 @@ void updatePhoneDisplay() {
   tft.setCursor(35, 90);
   tft.setTextSize(3);
   currentGuess = "";
+
   if (enteredPhone == "") {
     tft.setTextColor(ECO_LIME);
     tft.print("___-___-____");
@@ -393,11 +412,11 @@ void drawFullScreen() {
   tft.print("Capacity: " + String(currentBinCount) + "/" + String(MAX_BIN_CAPACITY));
   tft.setCursor(20, 190);
   tft.setTextSize(1);
-  tft.print("Admin: Enter 0000000000 to Reset Bin");
+  tft.print("Admin: Enter 0000000000 to Reset");
 }
 
 // ==========================================
-// CORE 1: MAIN LOOP
+// 🧠 CORE 1: MAIN LOOP (สมองสั่งการหน้าตู้)
 // ==========================================
 void loop() {
   static unsigned long lastColorUpdate = 0;
@@ -407,11 +426,12 @@ void loop() {
         if (triggerSyncVIP) neopixelWrite(RGBPin, 0, 40, 0);
         else neopixelWrite(RGBPin, 0, 10, 0);
       } else neopixelWrite(RGBPin, 20, 5, 0);
-    } else if (currentState == STATE_FULL) {
-      neopixelWrite(RGBPin, 20, 0, 0);
-    }
+    } else if (currentState == STATE_FULL) neopixelWrite(RGBPin, 20, 0, 0);
     lastColorUpdate = millis();
   }
+
+  // 🚀 ปลุกหน้าจอถ้ามีคนบังเซนเซอร์
+  if (digitalRead(IRPin) == LOW) wakeUpScreen();
 
   switch (currentState) {
     case STATE_IDLE:
@@ -421,12 +441,15 @@ void loop() {
           isFullScreenDrawn = false;
           networkResult = 0;
           triggerAlert = true;
-          sendAudioCommand(9);  // 🚀 สั่งวิทยุ: เสียงไซเรนตู้เต็ม
+          sendAudioCommand(9);
           currentState = STATE_FULL;
           break;
         }
+
         char key = keypad.getKey();
         if (key) {
+          wakeUpScreen();  // 🚀 ปลุกหน้าจอเมื่อนิ้วแตะปุ่ม
+
           if (key == '*') {
             if (enteredPhone.length() > 0) enteredPhone.remove(enteredPhone.length() - 1);
             updatePhoneDisplay();
@@ -451,22 +474,17 @@ void loop() {
               tft.print("UPDATING FIRMWARE");
               tft.setCursor(30, 130);
               tft.setTextSize(2);
-              tft.print("Downloading from GitHub...");
+              tft.print("Downloading...");
               networkResult = 0;
               triggerUpdate = true;
               currentState = STATE_UPDATING;
             } else if (enteredPhone == "8888888888") {
-              tft.fillScreen(0xF800);
-              tft.setCursor(40, 110);
-              tft.setTextColor(ILI9341_WHITE);
-              tft.setTextSize(2);
-              tft.print("FORCING BIN FULL...");
               currentBinCount = MAX_BIN_CAPACITY;
               prefs.putInt("binCount", currentBinCount);
               isFullScreenDrawn = false;
               networkResult = 0;
               triggerAlert = true;
-              sendAudioCommand(9);  // 🚀 สั่งวิทยุ: เสียงไซเรน
+              sendAudioCommand(9);
               currentState = STATE_FULL;
             } else {
               tft.fillScreen(ECO_DARK);
@@ -474,7 +492,7 @@ void loop() {
               tft.setTextColor(ECO_CYAN);
               tft.setTextSize(3);
               tft.print("VERIFYING...");
-              sendAudioCommand(1);  // 🚀 สั่งวิทยุ: เสียงกำลังตรวจสอบ
+              sendAudioCommand(1);
               networkResult = 0;
               triggerVerify = true;
               currentState = STATE_VERIFYING;
@@ -492,6 +510,7 @@ void loop() {
         }
         char key = keypad.getKey();
         if (key) {
+          wakeUpScreen();
           if (key == '*') {
             if (enteredPhone.length() > 0) enteredPhone.remove(enteredPhone.length() - 1);
           } else if (key != '#' && enteredPhone.length() < 10) {
@@ -528,10 +547,14 @@ void loop() {
       {
         if (networkResult == 1) {
           sessionBottles = 0;
-          topServo.attach(SERVO_PIN);
-          topServo.write(85);
+          if (!topServo.attached()) topServo.attach(SERVO_PIN);
+          // 🚀 เปิดฝาต้อนรับ
+          for (int pos = 15; pos <= 85; pos += 2) {
+            topServo.write(pos);
+            vTaskDelay(pdMS_TO_TICKS(10));
+          }
           drawUnlockedScreen();
-          sendAudioCommand(2);  // 🚀 สั่งวิทยุ: เสียงสำเร็จ ยืนยันตัวตนผ่าน
+          sendAudioCommand(2);
           currentState = STATE_ACTIVE;
         } else if (networkResult == 2) {
           tft.fillScreen(0x8000);
@@ -539,7 +562,7 @@ void loop() {
           tft.setTextColor(ILI9341_WHITE);
           tft.setTextSize(3);
           tft.print("USER NOT FOUND");
-          sendAudioCommand(5);  // 🚀 สั่งวิทยุ: เสียง Error หาผู้ใช้ไม่พบ
+          sendAudioCommand(5);
           delay(3000);
           enteredPhone = "";
           drawLockedScreen();
@@ -548,40 +571,33 @@ void loop() {
         break;
       }
 
-case STATE_ACTIVE:
+    case STATE_ACTIVE:
       {
-        // 🚀 แก้ไข: ลดเวลา Debounce ลงเหลือ 5ms ให้เซนเซอร์จับตาดูขวดแบบตาไม่กะพริบ!
         if (digitalRead(IRPin) == LOW) {
-          delay(5); 
+          delay(5);  // 🚀 ตาไวขึ้น (จับขวดร่วงเร็ว)
           if (digitalRead(IRPin) == LOW) {
-            
             sessionBottles++;
             villageTotal++;
             currentBinCount++;
             prefs.putInt("binCount", currentBinCount);
             updateBottleCountOnly();
-            sendAudioCommand(3); 
+            sendAudioCommand(3);
 
-            if(!topServo.attached()) {
-              topServo.attach(SERVO_PIN);
-            }
-            
-            // สั่งปิดฝาแบบนุ่มนวล
+            if (!topServo.attached()) topServo.attach(SERVO_PIN);
+            // สั่งปิดฝาแบบ Sweep
             for (int pos = 85; pos >= 15; pos -= 2) {
               topServo.write(pos);
-              vTaskDelay(pdMS_TO_TICKS(15)); 
+              vTaskDelay(pdMS_TO_TICKS(15));
             }
-            
-            vTaskDelay(pdMS_TO_TICKS(3000)); 
 
-            // รอจนกว่าขวดจะพ้นหน้าเซนเซอร์จริงๆ
+            vTaskDelay(pdMS_TO_TICKS(3000));
+
             int irTimeout = 0;
-            while (digitalRead(IRPin) == LOW && irTimeout < 200) { 
-                vTaskDelay(pdMS_TO_TICKS(10)); 
-                irTimeout++; 
-            } 
+            while (digitalRead(IRPin) == LOW && irTimeout < 200) {
+              vTaskDelay(pdMS_TO_TICKS(10));
+              irTimeout++;
+            }
 
-            // เปิดฝากลับเพื่อรอรับขวดใหม่
             if (currentBinCount < MAX_BIN_CAPACITY) {
               for (int pos = 15; pos <= 85; pos += 2) {
                 topServo.write(pos);
@@ -590,25 +606,31 @@ case STATE_ACTIVE:
             }
           }
         }
-        
+
         char key = keypad.getKey();
+        if (key) wakeUpScreen();
+
         if (key == '*' || currentBinCount >= MAX_BIN_CAPACITY) {
-          if(!topServo.attached()) topServo.attach(SERVO_PIN);
-          
+          if (!topServo.attached()) topServo.attach(SERVO_PIN);
+
           for (int pos = 85; pos >= 15; pos -= 2) {
             topServo.write(pos);
             vTaskDelay(pdMS_TO_TICKS(15));
           }
-          
           delay(500);
-          topServo.detach(); 
-          
+          topServo.detach();
+
+          vTaskDelay(pdMS_TO_TICKS(1000));  // 🚀 ให้ไฟเลี้ยงบอร์ดฟื้นตัว (แก้จอขาว)
+
           tft.fillScreen(ECO_CYAN);
           tft.setCursor(50, 110);
           tft.setTextColor(ECO_DARK);
           tft.setTextSize(3);
           tft.print("SAVING...");
-          sendAudioCommand(4); 
+          sendAudioCommand(4);
+
+          vTaskDelay(pdMS_TO_TICKS(500));  // 🚀 ให้ภาพวาดเสร็จก่อน Wi-Fi กระชากไฟ
+
           networkResult = 0;
           triggerSave = true;
           currentState = STATE_SAVING;
@@ -620,6 +642,9 @@ case STATE_ACTIVE:
       {
         if (networkResult == 1) {
           delay(1000);
+          // 🚀 ปลุกหน้าจอเผื่อดับ (Anti-White Screen)
+          tft.begin();
+          tft.setRotation(1);
           enteredPhone = "";
           sessionBottles = 0;
           drawLockedScreen();
@@ -656,14 +681,31 @@ case STATE_ACTIVE:
         break;
       }
   }
+
+  // ==========================================
+  // 🌙 โลจิกเช็คเวลาเพื่อทาสีดำทับหน้าจอ
+  // ==========================================
+  if (!isScreenSleeping && (millis() - lastActivityTime > SLEEP_TIMEOUT)) {
+    if (currentState == STATE_IDLE) {
+      tft.fillScreen(ECO_DARK);  // จอดำเพื่อลดความร้อน
+      isScreenSleeping = true;
+      Serial.println("🌙 เข้าสู่โหมดจำศีล (Black Screen)");
+    }
+  }
+
   vTaskDelay(pdMS_TO_TICKS(10));
 }
 
 void setup() {
   Serial.begin(115200);
   pinMode(IRPin, INPUT_PULLUP);
+
+  // ให้เซอร์โวปิดฝารอไว้ตอนเปิดเครื่อง
   topServo.attach(SERVO_PIN);
-  topServo.write(2);
+  for (int pos = 85; pos >= 15; pos -= 2) {
+    topServo.write(pos);
+    delay(15);
+  }
   delay(500);
   topServo.detach();
 
@@ -679,7 +721,6 @@ void setup() {
   prefs.begin("ecoDB", false);
   currentBinCount = prefs.getInt("binCount", 0);
 
-  // 🚀 เปิดระบบวิทยุ ESP-NOW
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) { Serial.println("Error initializing ESP-NOW"); }
   memcpy(peerInfo.peer_addr, audioBoardAddress, 6);
@@ -689,5 +730,7 @@ void setup() {
 
   delay(1000);
   drawLockedScreen();
+  lastActivityTime = millis();  // 🚀 เริ่มจับเวลา Sleep Mode
+
   xTaskCreatePinnedToCore(networkTask, "NetTask", 20000, NULL, 1, &TaskCore0, 0);
 }
