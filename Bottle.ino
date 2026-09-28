@@ -10,10 +10,10 @@
 #include <ArduinoOTA.h>
 #include <HTTPUpdate.h>
 #include <esp_now.h>
-#include <ArduinoJson.h>  // 🚀 เพิ่มไลบรารี JSON
+#include <ArduinoJson.h>
 
 // ==========================================
-// 📡 การตั้งค่าวิทยุเสียง (ESP-NOW)
+// การตั้งค่าวิทยุเสียง (ESP-NOW)
 // ==========================================
 uint8_t audioBoardAddress[] = { 0xE0, 0x72, 0xA1, 0xD6, 0xDE, 0xE4 };
 typedef struct struct_message {
@@ -28,7 +28,7 @@ void sendAudioCommand(int cmd) {
 }
 
 // ==========================================
-// ⚙️ การตั้งค่าระบบหลัก
+// การตั้งค่าระบบหลัก
 // ==========================================
 const int MAX_BIN_CAPACITY = 150;
 int currentBinCount = 0;
@@ -82,7 +82,7 @@ byte colPins[COLS] = { 8, 16, 46 };
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 // ==========================================
-// 🌙 โหมดพักหน้าจอจำศีล (Screen Saver)
+// โหมดพักหน้าจอจำศีล (Screen Saver)
 // ==========================================
 unsigned long lastActivityTime = 0;
 const unsigned long SLEEP_TIMEOUT = 60000;  // จอดำเมื่อไม่มีการขยับ 1 นาที
@@ -91,7 +91,7 @@ bool isScreenSleeping = false;
 void wakeUpScreen();  // ประกาศฟังก์ชันล่วงหน้า
 
 // ==========================================
-// 🗂️ สถานะระบบ (FSM & Data)
+// สถานะระบบ (FSM & Data)
 // ==========================================
 enum SystemState { STATE_IDLE,
                    STATE_VERIFYING,
@@ -118,7 +118,7 @@ int numKnownUsers = 0;
 String currentGuess = "";
 volatile bool triggerSyncVIP = true;
 
-// 🚀 ฟังก์ชันแกะกล่อง JSON
+// ฟังก์ชันแกะกล่อง JSON
 void parseVIPData(String payload) {
   DynamicJsonDocument doc(4096);
   DeserializationError error = deserializeJson(doc, payload);
@@ -144,7 +144,7 @@ void parseVIPData(String payload) {
 }
 
 // ==========================================
-// 🌐 CORE 0: Network Task (ทำงานหลังบ้าน)
+// CORE 0: Network Task (ทำงานหลังบ้าน)
 // ==========================================
 void networkTask(void* pvParameters) {
   vTaskDelay(pdMS_TO_TICKS(2000));
@@ -272,7 +272,7 @@ void maintainWiFi() {
 }
 
 // ==========================================
-// 🎨 UI & Graphics Functions
+// UI & Graphics Functions
 // ==========================================
 void wakeUpScreen() {
   if (isScreenSleeping) {
@@ -416,7 +416,7 @@ void drawFullScreen() {
 }
 
 // ==========================================
-// 🧠 CORE 1: MAIN LOOP (สมองสั่งการหน้าตู้)
+// CORE 1: MAIN LOOP (สมองสั่งการหน้าตู้)
 // ==========================================
 void loop() {
   static unsigned long lastColorUpdate = 0;
@@ -448,7 +448,7 @@ void loop() {
 
         char key = keypad.getKey();
         if (key) {
-          wakeUpScreen();  // 🚀 ปลุกหน้าจอเมื่อนิ้วแตะปุ่ม
+          wakeUpScreen();  // ปลุกหน้าจอเมื่อนิ้วแตะปุ่ม
 
           if (key == '*') {
             if (enteredPhone.length() > 0) enteredPhone.remove(enteredPhone.length() - 1);
@@ -574,7 +574,7 @@ void loop() {
     case STATE_ACTIVE:
       {
         if (digitalRead(IRPin) == LOW) {
-          delay(5);  // 🚀 ตาไวขึ้น (จับขวดร่วงเร็ว)
+          delay(5);  // ตาไวขึ้น (จับขวดร่วงเร็ว)
           if (digitalRead(IRPin) == LOW) {
             sessionBottles++;
             villageTotal++;
@@ -620,7 +620,7 @@ void loop() {
           delay(500);
           topServo.detach();
 
-          vTaskDelay(pdMS_TO_TICKS(1000));  // 🚀 ให้ไฟเลี้ยงบอร์ดฟื้นตัว (แก้จอขาว)
+          vTaskDelay(pdMS_TO_TICKS(1000));  // ให้ไฟเลี้ยงบอร์ดฟื้นตัว (แก้จอขาว)
 
           tft.fillScreen(ECO_CYAN);
           tft.setCursor(50, 110);
@@ -629,7 +629,7 @@ void loop() {
           tft.print("SAVING...");
           sendAudioCommand(4);
 
-          vTaskDelay(pdMS_TO_TICKS(500));  // 🚀 ให้ภาพวาดเสร็จก่อน Wi-Fi กระชากไฟ
+          vTaskDelay(pdMS_TO_TICKS(500));  // ให้ภาพวาดเสร็จก่อน Wi-Fi กระชากไฟ
 
           networkResult = 0;
           triggerSave = true;
@@ -683,7 +683,7 @@ void loop() {
   }
 
   // ==========================================
-  // 🌙 โลจิกเช็คเวลาเพื่อทาสีดำทับหน้าจอ
+  // โลจิกเช็คเวลาเพื่อทาสีดำทับหน้าจอ
   // ==========================================
   if (!isScreenSleeping && (millis() - lastActivityTime > SLEEP_TIMEOUT)) {
     if (currentState == STATE_IDLE) {
@@ -730,7 +730,7 @@ void setup() {
 
   delay(1000);
   drawLockedScreen();
-  lastActivityTime = millis();  // 🚀 เริ่มจับเวลา Sleep Mode
+  lastActivityTime = millis();  // เริ่มจับเวลา Sleep Mode
 
   xTaskCreatePinnedToCore(networkTask, "NetTask", 20000, NULL, 1, &TaskCore0, 0);
 }
