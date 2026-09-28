@@ -51,7 +51,7 @@ String googleScriptURL = "https://script.google.com/macros/s/AKfycbxI8vNijOMuvZ4
 String githubFirmwareURL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/firmware.bin";
 
 // ==========================================
-// 🔌 พินและฮาร์ดแวร์
+// พินและฮาร์ดแวร์
 // ==========================================
 #define TFT_DC 9
 #define TFT_CS 10
